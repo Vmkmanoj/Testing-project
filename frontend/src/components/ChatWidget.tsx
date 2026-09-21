@@ -1,6 +1,5 @@
 import { useState, useRef, useEffect } from 'react';
 import { MessageSquare, X, Send, Bot, User, Loader2, Maximize2, Minimize2 } from 'lucide-react';
-import { agentApi } from '../api';
 import ReactMarkdown from 'react-markdown';
 
 interface ChatMessage {
