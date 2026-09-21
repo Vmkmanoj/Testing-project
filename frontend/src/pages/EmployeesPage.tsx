@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { employeeApi, authApi } from '../api';
 import { Plus, Trash2, Search, X, Edit } from 'lucide-react';
 import { useAuth } from '../AuthContext';
@@ -7,16 +8,16 @@ interface Employee { id: string; first_name: string; last_name: string | null; e
 
 function RegisterModal({ onClose, onSuccess, managers }: { onClose: () => void; onSuccess: () => void; managers: Employee[] }) {
   const [form, setForm] = useState({ first_name: '', last_name: '', email: '', password: '', role: 'EMPLOYEE', manager_id: '' });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try { await authApi.register(form); onSuccess(); onClose(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed to register employee.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => authApi.register(form),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed to register employee.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -55,7 +56,7 @@ function RegisterModal({ onClose, onSuccess, managers }: { onClose: () => void; 
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Register'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? <span className="spinner" /> : 'Register'}</button>
           </div>
         </form>
       </div>
@@ -65,16 +66,16 @@ function RegisterModal({ onClose, onSuccess, managers }: { onClose: () => void; 
 
 function EditModal({ employee, managers, onClose, onSuccess }: { employee: Employee; managers: Employee[]; onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ first_name: employee.first_name, last_name: employee.last_name || '', is_active: employee.is_active, manager_id: employee.manager_id || '' });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try { await employeeApi.update(employee.id, form); onSuccess(); onClose(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed to update employee.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => employeeApi.update(employee.id, form),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed to update employee.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -106,7 +107,7 @@ function EditModal({ employee, managers, onClose, onSuccess }: { employee: Emplo
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Save Changes'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? <span className="spinner" /> : 'Save Changes'}</button>
           </div>
         </form>
       </div>
@@ -116,38 +117,49 @@ function EditModal({ employee, managers, onClose, onSuccess }: { employee: Emplo
 
 export default function EmployeesPage() {
   const { user } = useAuth();
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [managers, setManagers] = useState<Employee[]>([]);
-  const [filtered, setFiltered] = useState<Employee[]>([]);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null);
-  const [deleting, setDeleting] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    try { 
+  const { data, isLoading } = useQuery({
+    queryKey: ['employees'],
+    queryFn: async () => {
       const [empRes, manRes] = await Promise.all([
         employeeApi.getAll(),
-        employeeApi.getManagers()
+        employeeApi.getManagers(),
       ]);
-      setEmployees(empRes.data.employees || []); 
-      setManagers(manRes.data.employees || []);
-    }
-    catch (_) {} finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, []);
-  useEffect(() => { setFiltered(employees.filter(e => `${e.first_name} ${e.last_name} ${e.email}`.toLowerCase().includes(search.toLowerCase()))); }, [search, employees]);
+      return {
+        employees: (empRes.data.employees || []) as Employee[],
+        managers: (manRes.data.employees || []) as Employee[],
+      };
+    },
+  });
 
-  const handleDelete = async (id: string) => {
+  const employees = data?.employees ?? [];
+  const managers = data?.managers ?? [];
+  const filtered = employees.filter(e =>
+    `${e.first_name} ${e.last_name} ${e.email}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => employeeApi.delete(id),
+    onMutate: (id) => setDeletingId(id),
+    onSettled: () => {
+      setDeletingId(null);
+      queryClient.invalidateQueries({ queryKey: ['employees'] });
+    },
+  });
+
+  const handleDelete = (id: string) => {
     if (!confirm('Delete this employee?')) return;
-    setDeleting(id);
-    try { await employeeApi.delete(id); load(); } catch (_) {} finally { setDeleting(null); }
+    deleteMutation.mutate(id);
   };
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['employees'] });
 
   const isHR = user?.role === 'HR';
-  const canEdit = isHR;
 
   return (
     <div>
@@ -167,7 +179,7 @@ export default function EmployeesPage() {
 
       <div className="card">
         <div className="table-wrap">
-          {loading ? <div className="loading-page"><span className="spinner" /></div> : (
+          {isLoading ? <div className="loading-page"><span className="spinner" /></div> : (
             <table>
               <thead>
                 <tr><th>Name</th><th>Email</th><th>Role</th><th>Manager</th><th>Status</th>{isHR && <th>Actions</th>}</tr>
@@ -191,8 +203,8 @@ export default function EmployeesPage() {
                           <button className="btn btn-sm btn-outline" onClick={() => setEditingEmployee(emp)} title="Edit">
                             <Edit size={13} />
                           </button>
-                          <button className="btn btn-sm btn-danger" onClick={() => handleDelete(emp.id)} disabled={deleting === emp.id} title="Delete">
-                            {deleting === emp.id ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <Trash2 size={13} />}
+                          <button className="btn btn-sm btn-danger" onClick={() => handleDelete(emp.id)} disabled={deletingId === emp.id} title="Delete">
+                            {deletingId === emp.id ? <span className="spinner" style={{ width: 12, height: 12 }} /> : <Trash2 size={13} />}
                           </button>
                         </div>
                       </td>
@@ -205,8 +217,8 @@ export default function EmployeesPage() {
         </div>
       </div>
 
-      {showModal && <RegisterModal managers={managers} onClose={() => setShowModal(false)} onSuccess={load} />}
-      {editingEmployee && <EditModal employee={editingEmployee} managers={managers} onClose={() => setEditingEmployee(null)} onSuccess={load} />}
+      {showModal && <RegisterModal managers={managers} onClose={() => setShowModal(false)} onSuccess={invalidate} />}
+      {editingEmployee && <EditModal employee={editingEmployee} managers={managers} onClose={() => setEditingEmployee(null)} onSuccess={invalidate} />}
     </div>
   );
 }

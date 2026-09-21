@@ -1,60 +1,55 @@
-import { useEffect, useState, useRef } from 'react';
+import { useRef } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useAuth } from '../AuthContext';
 import { employeeApi, clientApi, leaveRequestApi, agentApi } from '../api';
 import { Users, Building2, CalendarClock, UserCheck, UploadCloud, Loader } from 'lucide-react';
 
-interface Stats { employees: number; clients: number; pendingLeaves: number; }
-
 export default function DashboardPage() {
   const { user } = useAuth();
-  const [stats, setStats] = useState<Stats>({ employees: 0, clients: 0, pendingLeaves: 0 });
-  const [loading, setLoading] = useState(true);
-  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    const load = async () => {
-      try {
-        const results = await Promise.allSettled([
-          user?.role === 'HR' ? employeeApi.getAll() : Promise.resolve(null),
-          user?.role === 'HR' ? clientApi.getAll() : Promise.resolve(null),
-          user?.role === 'HR' ? leaveRequestApi.getAll() : leaveRequestApi.getMy(),
-        ]);
-
-        const empData = results[0].status === 'fulfilled' ? results[0].value?.data : null;
-        const cliData = results[1].status === 'fulfilled' ? results[1].value?.data : null;
-        const leaveData = results[2].status === 'fulfilled' ? results[2].value?.data : null;
-
-        const actualLeaveData = Array.isArray(leaveData) ? leaveData : leaveData?.items || [];
-        const pendingLeaves = actualLeaveData.filter((r: any) => r.status === 'PENDING').length;
-
-        setStats({
-          employees: empData?.total || empData?.employees?.length || 0,
-          clients: cliData?.total || cliData?.clients?.length || 0,
-          pendingLeaves,
-        });
-      } catch (_) { }
-      setLoading(false);
-    };
-    load();
-  }, [user]);
-
   const isHR = user?.role === 'HR';
   const isManager = user?.role === 'MANAGER';
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const { data: statsData, isLoading } = useQuery({
+    queryKey: ['dashboard-stats', user?.role],
+    queryFn: async () => {
+      const results = await Promise.allSettled([
+        isHR ? employeeApi.getAll() : Promise.resolve(null),
+        isHR ? clientApi.getAll() : Promise.resolve(null),
+        isHR ? leaveRequestApi.getAll() : leaveRequestApi.getMy(),
+      ]);
+      const empData = results[0].status === 'fulfilled' ? results[0].value?.data : null;
+      const cliData = results[1].status === 'fulfilled' ? results[1].value?.data : null;
+      const leaveData = results[2].status === 'fulfilled' ? results[2].value?.data : null;
+      const actualLeaveData = Array.isArray(leaveData) ? leaveData : leaveData?.items || [];
+      const pendingLeaves = actualLeaveData.filter((r: any) => r.status === 'PENDING').length;
+      return {
+        employees: empData?.total || empData?.employees?.length || 0,
+        clients: cliData?.total || cliData?.clients?.length || 0,
+        pendingLeaves,
+      };
+    },
+    enabled: !!user,
+  });
+
+  const stats = statsData ?? { employees: 0, clients: 0, pendingLeaves: 0 };
+
+  const uploadMutation = useMutation({
+    mutationFn: (file: File) => agentApi.uploadPdf(file),
+    onSuccess: () => {
+      alert('Document uploaded successfully!');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    },
+    onError: () => {
+      alert('Failed to upload document.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    },
+  });
+
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
-    try {
-      await agentApi.uploadPdf(file);
-      alert('Document uploaded successfully!');
-    } catch (err) {
-      alert('Failed to upload document.');
-    } finally {
-      setUploading(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
-    }
+    uploadMutation.mutate(file);
   };
 
   return (
@@ -77,16 +72,16 @@ export default function DashboardPage() {
               className="btn btn-primary"
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', fontWeight: 600, boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}
               onClick={() => fileInputRef.current?.click()}
-              disabled={uploading}
+              disabled={uploadMutation.isPending}
             >
-              {uploading ? <Loader style={{ animation: 'spin 1s linear infinite' }} size={18} /> : <UploadCloud size={18} />}
-              {uploading ? 'Uploading...' : 'Upload Policy'}
+              {uploadMutation.isPending ? <Loader style={{ animation: 'spin 1s linear infinite' }} size={18} /> : <UploadCloud size={18} />}
+              {uploadMutation.isPending ? 'Uploading...' : 'Upload Policy'}
             </button>
           </div>
         )}
       </div>
 
-      {loading ? (
+      {isLoading ? (
         <div className="loading-page"><span className="spinner" /></div>
       ) : (
         <div className="stats-grid">

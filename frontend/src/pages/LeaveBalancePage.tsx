@@ -1,20 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { leaveBalanceApi } from '../api';
 import { BarChart3 } from 'lucide-react';
 
-interface Balance { id: string; leave_type_id: string; year: number; total_days: number; used_days: number; leave_type_name : string }
+interface Balance { id: string; leave_type_id: string; year: number; total_days: number; used_days: number; leave_type_name: string }
 
 export default function LeaveBalancePage() {
-  const [balances, setBalances] = useState<Balance[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    const load = async () => {
-      try { const r = await leaveBalanceApi.getMy(); setBalances(r.data); }
-      catch (_) {} finally { setLoading(false); }
-    };
-    load();
-  }, []);
+  const { data: balances = [], isLoading } = useQuery({
+    queryKey: ['leave-balance'],
+    queryFn: async () => {
+      const r = await leaveBalanceApi.getMy();
+      return r.data as Balance[];
+    },
+  });
 
   return (
     <div>
@@ -22,7 +19,7 @@ export default function LeaveBalancePage() {
         <div><h2 className="page-title">My Leave Balance</h2><p className="page-subtitle">Current year leave entitlements</p></div>
       </div>
 
-      {loading ? <div className="loading-page"><span className="spinner" /></div> : balances.length === 0 ? (
+      {isLoading ? <div className="loading-page"><span className="spinner" /></div> : balances.length === 0 ? (
         <div className="card"><div className="card-body"><div className="empty-state"><BarChart3 /><p>No leave balances found. Contact HR to set up your leave entitlements.</p></div></div></div>
       ) : (
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16 }}>

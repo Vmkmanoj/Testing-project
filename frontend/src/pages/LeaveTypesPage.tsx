@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leaveTypeApi } from '../api';
 import { Plus, Trash2, Edit2, X } from 'lucide-react';
 
@@ -6,19 +7,16 @@ interface LeaveType { id: string; name: string; description: string; max_days_pe
 
 function LeaveTypeModal({ item, onClose, onSuccess }: { item?: LeaveType; onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ name: item?.name || '', description: item?.description || '', max_days_per_year: item?.max_days_per_year || 10 });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try {
-      if (item) await leaveTypeApi.update(item.id, form);
-      else await leaveTypeApi.create(form);
-      onSuccess(); onClose();
-    } catch (err: any) { setError(err.response?.data?.detail || 'Failed.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => item ? leaveTypeApi.update(item.id, form) : leaveTypeApi.create(form),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -36,7 +34,7 @@ function LeaveTypeModal({ item, onClose, onSuccess }: { item?: LeaveType; onClos
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Save'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? <span className="spinner" /> : 'Save'}</button>
           </div>
         </form>
       </div>
@@ -45,21 +43,28 @@ function LeaveTypeModal({ item, onClose, onSuccess }: { item?: LeaveType; onClos
 }
 
 export default function LeaveTypesPage() {
-  const [leaveTypes, setLeaveTypes] = useState<LeaveType[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [modal, setModal] = useState<{ open: boolean; item?: LeaveType }>({ open: false });
 
-  const load = async () => {
-    setLoading(true);
-    try { const r = await leaveTypeApi.getAll(); setLeaveTypes(r.data); }
-    catch (_) {} finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, []);
+  const { data = [], isLoading } = useQuery({
+    queryKey: ['leave-types'],
+    queryFn: async () => {
+      const r = await leaveTypeApi.getAll();
+      return r.data as LeaveType[];
+    },
+  });
 
-  const handleDelete = async (id: string) => {
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => leaveTypeApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['leave-types'] }),
+  });
+
+  const handleDelete = (id: string) => {
     if (!confirm('Delete this leave type?')) return;
-    await leaveTypeApi.delete(id); load();
+    deleteMutation.mutate(id);
   };
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['leave-types'] });
 
   return (
     <div>
@@ -69,12 +74,12 @@ export default function LeaveTypesPage() {
       </div>
       <div className="card">
         <div className="table-wrap">
-          {loading ? <div className="loading-page"><span className="spinner" /></div> : (
+          {isLoading ? <div className="loading-page"><span className="spinner" /></div> : (
             <table>
               <thead><tr><th>Name</th><th>Description</th><th>Max Days/Year</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
-                {leaveTypes.length === 0 ? <tr><td colSpan={5}><div className="empty-state"><p>No leave types yet.</p></div></td></tr>
-                  : leaveTypes.map(lt => (
+                {data.length === 0 ? <tr><td colSpan={5}><div className="empty-state"><p>No leave types yet.</p></div></td></tr>
+                  : data.map(lt => (
                     <tr key={lt.id}>
                       <td style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{lt.name.replace(/_/g, ' ')}</td>
                       <td>{lt.description || '—'}</td>
@@ -82,7 +87,13 @@ export default function LeaveTypesPage() {
                       <td><span className={`badge ${lt.is_active ? 'badge-green' : 'badge-gray'}`}>{lt.is_active ? 'Active' : 'Inactive'}</span></td>
                       <td style={{ display: 'flex', gap: 6 }}>
                         <button className="btn btn-sm btn-outline" onClick={() => setModal({ open: true, item: lt })}><Edit2 size={13} /></button>
-                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(lt.id)}><Trash2 size={13} /></button>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          onClick={() => handleDelete(lt.id)}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 size={13} />
+                        </button>
                       </td>
                     </tr>
                   ))}
@@ -91,7 +102,7 @@ export default function LeaveTypesPage() {
           )}
         </div>
       </div>
-      {modal.open && <LeaveTypeModal item={modal.item} onClose={() => setModal({ open: false })} onSuccess={load} />}
+      {modal.open && <LeaveTypeModal item={modal.item} onClose={() => setModal({ open: false })} onSuccess={invalidate} />}
     </div>
   );
 }

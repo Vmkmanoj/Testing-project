@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { projectApi, teamApi, employeeApi, clientApi } from '../api';
 import { useAuth } from '../AuthContext';
-import {  Users, X, FolderOpen, UserPlus } from 'lucide-react';
+import { Users, X, FolderOpen, UserPlus } from 'lucide-react';
 
 interface Team { id: string; name: string; description: string; project_id: string; member_count: number; }
 interface Project { id: string; name: string; description: string; status: string; client_id: string; }
@@ -10,16 +11,16 @@ interface Employee { id: string; first_name: string; last_name: string | null; e
 
 function CreateProjectModal({ clients, onClose, onSuccess }: { clients: Client[]; onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ name: '', description: '', client_id: clients[0]?.id || '', status: 'PLANNING' });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try { await projectApi.create(form); onSuccess(); onClose(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed to create project.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => projectApi.create(form),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed to create project.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -44,7 +45,7 @@ function CreateProjectModal({ clients, onClose, onSuccess }: { clients: Client[]
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading || clients.length === 0}>{loading ? <span className="spinner" /> : 'Create'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending || clients.length === 0}>{mutation.isPending ? <span className="spinner" /> : 'Create'}</button>
           </div>
         </form>
       </div>
@@ -54,16 +55,16 @@ function CreateProjectModal({ clients, onClose, onSuccess }: { clients: Client[]
 
 function CreateTeamModal({ projects, onClose, onSuccess }: { projects: Project[]; onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ name: '', description: '', project_id: projects[0]?.id || '' });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try { await projectApi.createTeam(form); onSuccess(); onClose(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => projectApi.createTeam(form),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -88,7 +89,7 @@ function CreateTeamModal({ projects, onClose, onSuccess }: { projects: Project[]
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading || projects.length === 0}>{loading ? <span className="spinner" /> : 'Create Team'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending || projects.length === 0}>{mutation.isPending ? <span className="spinner" /> : 'Create Team'}</button>
           </div>
         </form>
       </div>
@@ -98,17 +99,17 @@ function CreateTeamModal({ projects, onClose, onSuccess }: { projects: Project[]
 
 function AssignMemberModal({ teams, employees, onClose, onSuccess }: { teams: Team[]; employees: Employee[]; onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ team_id: teams[0]?.id || '', user_id: employees[0]?.id || '' });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setSuccess(''); setLoading(true);
-    try { await teamApi.assign(form); setSuccess('Employee assigned successfully!'); onSuccess(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed to assign.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => teamApi.assign(form),
+    onSuccess: () => { setSuccess('Employee assigned successfully!'); onSuccess(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed to assign.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); setSuccess(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -140,7 +141,7 @@ function AssignMemberModal({ teams, employees, onClose, onSuccess }: { teams: Te
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Close</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Assign'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? <span className="spinner" /> : 'Assign'}</button>
           </div>
         </form>
       </div>
@@ -150,34 +151,35 @@ function AssignMemberModal({ teams, employees, onClose, onSuccess }: { teams: Te
 
 export default function TeamsPage() {
   const { user } = useAuth();
-  const [teams, setTeams] = useState<Team[]>([]);
-  const [projects, setProjects] = useState<Project[]>([]);
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [clients, setClients] = useState<Client[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [dataReady, setDataReady] = useState(false);
+  const queryClient = useQueryClient();
   const [modal, setModal] = useState<'project' | 'team' | 'assign' | null>(null);
   const isManager = user?.role === 'MANAGER';
 
-  const load = async () => {
-    setLoading(true);
-    try {
+  const { data, isLoading } = useQuery({
+    queryKey: ['teams-page'],
+    queryFn: async () => {
       const [teamsRes, projRes, empRes, cliRes] = await Promise.allSettled([
         teamApi.getAll(),
         projectApi.getAll(),
         employeeApi.getAll(),
         clientApi.getAll(),
       ]);
-      if (teamsRes.status === 'fulfilled') setTeams(teamsRes.value.data.teams || []);
-      if (projRes.status === 'fulfilled') setProjects(projRes.value.data.projects || []);
-      if (empRes.status === 'fulfilled') setEmployees(empRes.value.data.employees || []);
-      if (cliRes.status === 'fulfilled') setClients(cliRes.value.data.clients || []);
-    } catch (_) {}
-    setLoading(false);
-    setDataReady(true);
-  };
+      return {
+        teams: (teamsRes.status === 'fulfilled' ? teamsRes.value.data.teams : []) as Team[],
+        projects: (projRes.status === 'fulfilled' ? projRes.value.data.projects : []) as Project[],
+        employees: (empRes.status === 'fulfilled' ? empRes.value.data.employees : []) as Employee[],
+        clients: (cliRes.status === 'fulfilled' ? cliRes.value.data.clients : []) as Client[],
+      };
+    },
+  });
 
-  useEffect(() => { load(); }, []);
+  const teams = data?.teams ?? [];
+  const projects = data?.projects ?? [];
+  const employees = data?.employees ?? [];
+  const clients = data?.clients ?? [];
+  const dataReady = !isLoading;
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['teams-page'] });
 
   const openModal = (type: 'project' | 'team' | 'assign') => {
     if (!dataReady) return;
@@ -227,7 +229,7 @@ export default function TeamsPage() {
       {/* Teams Section */}
       <div>
         <h3 style={{ fontSize: 14, fontWeight: 600, color: 'var(--text-muted)', marginBottom: 12, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Teams</h3>
-        {loading ? <div className="loading-page"><span className="spinner" /></div> : teams.length === 0 ? (
+        {isLoading ? <div className="loading-page"><span className="spinner" /></div> : teams.length === 0 ? (
           <div className="card"><div className="card-body">
             <div className="empty-state">
               <Users style={{ width: 48, height: 48 }} />
@@ -258,10 +260,9 @@ export default function TeamsPage() {
       </div>
 
       {/* Modals */}
-      {modal === 'project' && <CreateProjectModal clients={clients} onClose={() => setModal(null)} onSuccess={load} />}
-      {modal === 'team' && <CreateTeamModal projects={projects} onClose={() => setModal(null)} onSuccess={load} />}
-      {modal === 'assign' && <AssignMemberModal teams={teams} employees={employees} onClose={() => setModal(null)} onSuccess={load} />}
+      {modal === 'project' && <CreateProjectModal clients={clients} onClose={() => setModal(null)} onSuccess={invalidate} />}
+      {modal === 'team' && <CreateTeamModal projects={projects} onClose={() => setModal(null)} onSuccess={invalidate} />}
+      {modal === 'assign' && <AssignMemberModal teams={teams} employees={employees} onClose={() => setModal(null)} onSuccess={invalidate} />}
     </div>
   );
 }
-
