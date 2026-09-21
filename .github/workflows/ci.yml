@@ -43,5 +43,11 @@ jobs:
       - name: Install dependencies
         run: uv sync
 
+      - name: Run Tests
+        run: |
+          uv run python test_api.py
+          uv run python test_endpoint.py
+          uv run python test_managers_api.py
+        
       - name: Check Backend Syntax
         run: uv run python -m py_compile main.py
