@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { leaveRequestApi, leaveTypeApi } from '../api';
 import { useAuth } from '../AuthContext';
 import { Plus, Check, X, CalendarDays } from 'lucide-react';
@@ -8,16 +9,16 @@ interface LT { id: string; name: string; }
 
 function ApplyModal({ leaveTypes, onClose, onSuccess }: { leaveTypes: LT[]; onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ leave_type_id: leaveTypes[0]?.id || '', start_date: '', end_date: '', total_days: 1, reason: '' });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, v: any) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try { await leaveRequestApi.create(form); onSuccess(); onClose(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed to apply for leave.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => leaveRequestApi.create(form),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed to apply for leave.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -44,7 +45,7 @@ function ApplyModal({ leaveTypes, onClose, onSuccess }: { leaveTypes: LT[]; onCl
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Submit'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? <span className="spinner" /> : 'Submit'}</button>
           </div>
         </form>
       </div>
@@ -55,15 +56,15 @@ function ApplyModal({ leaveTypes, onClose, onSuccess }: { leaveTypes: LT[]; onCl
 function ActionModal({ request, onClose, onSuccess }: { request: LR; onClose: () => void; onSuccess: () => void }) {
   const [action, setAction] = useState<'APPROVED' | 'REJECTED'>('APPROVED');
   const [comment, setComment] = useState('');
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try { await leaveRequestApi.action(request.id, { action, comment }); onSuccess(); onClose(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => leaveRequestApi.action(request.id, { action, comment }),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -102,7 +103,7 @@ function ActionModal({ request, onClose, onSuccess }: { request: LR; onClose: ()
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Confirm'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? <span className="spinner" /> : 'Confirm'}</button>
           </div>
         </form>
       </div>
@@ -112,32 +113,39 @@ function ActionModal({ request, onClose, onSuccess }: { request: LR; onClose: ()
 
 export default function LeaveRequestsPage() {
   const { user } = useAuth();
-  const [requests, setRequests] = useState<LR[]>([]);
-  const [leaveTypes, setLeaveTypes] = useState<LT[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [showApply, setShowApply] = useState(false);
   const [actionItem, setActionItem] = useState<LR | null>(null);
   const [page, setPage] = useState(1);
-  const [total, setTotal] = useState(0);
   const limit = 10;
 
   const isHR = user?.role === 'HR';
   const isManager = user?.role === 'MANAGER';
   const canApprove = isHR || isManager;
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const [reqRes, ltRes] = await Promise.all([
-        canApprove ? leaveRequestApi.getAll(page, limit) : leaveRequestApi.getMy(page, limit),
-        leaveTypeApi.getAll(),
-      ]);
-      setRequests(reqRes.data.items);
-      setTotal(reqRes.data.total);
-      setLeaveTypes(ltRes.data);
-    } catch (_) {} finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, [page]);
+  const { data: requestsData, isLoading: requestsLoading } = useQuery({
+    queryKey: ['leave-requests', page, canApprove],
+    queryFn: async () => {
+      const res = canApprove
+        ? await leaveRequestApi.getAll(page, limit)
+        : await leaveRequestApi.getMy(page, limit);
+      return { items: res.data.items as LR[], total: res.data.total as number };
+    },
+    enabled: !!user,
+  });
+
+  const { data: leaveTypes = [] } = useQuery({
+    queryKey: ['leave-types'],
+    queryFn: async () => {
+      const res = await leaveTypeApi.getAll();
+      return res.data as LT[];
+    },
+  });
+
+  const requests = requestsData?.items ?? [];
+  const total = requestsData?.total ?? 0;
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['leave-requests'] });
 
   const statusBadge = (s: string) =>
     s === 'APPROVED' ? 'badge-green' : s === 'REJECTED' ? 'badge-red' : 'badge-yellow';
@@ -150,7 +158,7 @@ export default function LeaveRequestsPage() {
       </div>
       <div className="card">
         <div className="table-wrap">
-          {loading ? <div className="loading-page"><span className="spinner" /></div> : (
+          {requestsLoading ? <div className="loading-page"><span className="spinner" /></div> : (
             <table>
               <thead><tr><th>Employee</th><th>Dates</th><th>Days</th><th>Reason</th><th>Status</th>{canApprove && <th>Action</th>}</tr></thead>
               <tbody>
@@ -175,32 +183,20 @@ export default function LeaveRequestsPage() {
             </table>
           )}
         </div>
-        {!loading && total > 0 && (
+        {!requestsLoading && total > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '16px', borderTop: '1px solid var(--border)' }}>
             <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>
               Showing {Math.min((page - 1) * limit + 1, total)} to {Math.min(page * limit, total)} of {total} entries
             </span>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button 
-                className="btn btn-outline btn-sm" 
-                disabled={page === 1} 
-                onClick={() => setPage(p => p - 1)}
-              >
-                Previous
-              </button>
-              <button 
-                className="btn btn-outline btn-sm" 
-                disabled={page * limit >= total} 
-                onClick={() => setPage(p => p + 1)}
-              >
-                Next
-              </button>
+              <button className="btn btn-outline btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Previous</button>
+              <button className="btn btn-outline btn-sm" disabled={page * limit >= total} onClick={() => setPage(p => p + 1)}>Next</button>
             </div>
           </div>
         )}
       </div>
-      {showApply && <ApplyModal leaveTypes={leaveTypes} onClose={() => setShowApply(false)} onSuccess={load} />}
-      {actionItem && <ActionModal request={actionItem} onClose={() => setActionItem(null)} onSuccess={load} />}
+      {showApply && <ApplyModal leaveTypes={leaveTypes} onClose={() => setShowApply(false)} onSuccess={invalidate} />}
+      {actionItem && <ActionModal request={actionItem} onClose={() => setActionItem(null)} onSuccess={invalidate} />}
     </div>
   );
 }
