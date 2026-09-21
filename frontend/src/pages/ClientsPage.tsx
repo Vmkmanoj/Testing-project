@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { clientApi } from '../api';
 import { Plus, Trash2, Search, X } from 'lucide-react';
 
@@ -6,16 +7,16 @@ interface Client { id: string; name: string; email: string; phone: string; compa
 
 function ClientModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({ name: '', email: '', phone: '', company_name: '' });
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
 
-  const submit = async (e: React.FormEvent) => {
-    e.preventDefault(); setError(''); setLoading(true);
-    try { await clientApi.create(form); onSuccess(); onClose(); }
-    catch (err: any) { setError(err.response?.data?.detail || 'Failed.'); }
-    finally { setLoading(false); }
-  };
+  const mutation = useMutation({
+    mutationFn: () => clientApi.create(form),
+    onSuccess: () => { onSuccess(); onClose(); },
+    onError: (err: any) => setError(err.response?.data?.detail || 'Failed.'),
+  });
+
+  const submit = (e: React.FormEvent) => { e.preventDefault(); setError(''); mutation.mutate(); };
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -36,7 +37,7 @@ function ClientModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
           </div>
           <div className="modal-footer">
             <button type="button" className="btn btn-outline" onClick={onClose}>Cancel</button>
-            <button type="submit" className="btn btn-primary" disabled={loading}>{loading ? <span className="spinner" /> : 'Add Client'}</button>
+            <button type="submit" className="btn btn-primary" disabled={mutation.isPending}>{mutation.isPending ? <span className="spinner" /> : 'Add Client'}</button>
           </div>
         </form>
       </div>
@@ -45,24 +46,34 @@ function ClientModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: (
 }
 
 export default function ClientsPage() {
-  const [clients, setClients] = useState<Client[]>([]);
-  const [filtered, setFiltered] = useState<Client[]>([]);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
-  const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
 
-  const load = async () => {
-    setLoading(true);
-    try { const r = await clientApi.getAll(); setClients(r.data.clients || []); }
-    catch (_) {} finally { setLoading(false); }
-  };
-  useEffect(() => { load(); }, []);
-  useEffect(() => { setFiltered(clients.filter(c => `${c.name} ${c.email} ${c.company_name}`.toLowerCase().includes(search.toLowerCase()))); }, [search, clients]);
+  const { data, isLoading } = useQuery({
+    queryKey: ['clients'],
+    queryFn: async () => {
+      const r = await clientApi.getAll();
+      return (r.data.clients || []) as Client[];
+    },
+  });
 
-  const handleDelete = async (id: string) => {
+  const clients = data ?? [];
+  const filtered = clients.filter(c =>
+    `${c.name} ${c.email} ${c.company_name}`.toLowerCase().includes(search.toLowerCase())
+  );
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => clientApi.delete(id),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['clients'] }),
+  });
+
+  const handleDelete = (id: string) => {
     if (!confirm('Delete this client?')) return;
-    await clientApi.delete(id); load();
+    deleteMutation.mutate(id);
   };
+
+  const invalidate = () => queryClient.invalidateQueries({ queryKey: ['clients'] });
 
   return (
     <div>
@@ -75,7 +86,7 @@ export default function ClientsPage() {
       </div>
       <div className="card">
         <div className="table-wrap">
-          {loading ? <div className="loading-page"><span className="spinner" /></div> : (
+          {isLoading ? <div className="loading-page"><span className="spinner" /></div> : (
             <table>
               <thead><tr><th>Name</th><th>Company</th><th>Email</th><th>Phone</th><th>Status</th><th>Actions</th></tr></thead>
               <tbody>
@@ -87,7 +98,15 @@ export default function ClientsPage() {
                       <td>{c.email || '—'}</td>
                       <td>{c.phone || '—'}</td>
                       <td><span className={`status-dot ${c.is_active ? 'dot-green' : 'dot-red'}`} />{c.is_active ? 'Active' : 'Inactive'}</td>
-                      <td><button className="btn btn-sm btn-danger" onClick={() => handleDelete(c.id)}><Trash2 size={13} /></button></td>
+                      <td>
+                        <button
+                          className="btn btn-sm btn-danger"
+                          onClick={() => handleDelete(c.id)}
+                          disabled={deleteMutation.isPending}
+                        >
+                          <Trash2 size={13} />
+                        </button>
+                      </td>
                     </tr>
                   ))}
               </tbody>
@@ -95,7 +114,7 @@ export default function ClientsPage() {
           )}
         </div>
       </div>
-      {showModal && <ClientModal onClose={() => setShowModal(false)} onSuccess={load} />}
+      {showModal && <ClientModal onClose={() => setShowModal(false)} onSuccess={invalidate} />}
     </div>
   );
 }

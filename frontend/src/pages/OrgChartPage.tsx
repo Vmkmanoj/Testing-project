@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { employeeApi } from '../api';
 import { Users, User as UserIcon, ChevronDown, ChevronRight } from 'lucide-react';
 
@@ -19,8 +20,8 @@ function OrgNode({ employee, employees }: { employee: Employee, employees: Emplo
 
   return (
     <div style={{ marginLeft: 24, marginTop: 12 }}>
-      <div 
-        style={{ 
+      <div
+        style={{
           display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px',
           background: 'var(--surface)', border: '1px solid var(--border)',
           borderRadius: 8, cursor: subordinates.length > 0 ? 'pointer' : 'default',
@@ -59,14 +60,14 @@ function OrgNode({ employee, employees }: { employee: Employee, employees: Emplo
 }
 
 export default function OrgChartPage() {
-  const [employees, setEmployees] = useState<Employee[]>([]);
-  const [loading, setLoading] = useState(true);
+  const { data: employees = [], isLoading } = useQuery({
+    queryKey: ['org-chart'],
+    queryFn: async () => {
+      const res = await employeeApi.getAll();
+      return (res.data.employees || []) as Employee[];
+    },
+  });
 
-  useEffect(() => {
-    employeeApi.getAll().then(res => setEmployees(res.data.employees || [])).finally(() => setLoading(false));
-  }, []);
-
-  // Top level employees are those without a manager or whose manager is not in the list
   const employeeIds = new Set(employees.map(e => e.id));
   const topLevel = employees.filter(e => !e.manager_id || !employeeIds.has(e.manager_id));
 
@@ -81,7 +82,7 @@ export default function OrgChartPage() {
 
       <div className="card">
         <div style={{ padding: 32, overflowX: 'auto', minHeight: 400 }}>
-          {loading ? (
+          {isLoading ? (
             <div className="loading-page"><span className="spinner" /></div>
           ) : employees.length === 0 ? (
             <div className="empty-state"><Users size={48} /><p>No employees found.</p></div>
