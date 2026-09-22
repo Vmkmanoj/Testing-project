@@ -10,7 +10,7 @@ class AgentState(TypedDict):
 
     intent: Optional[str]
 
-    # Leave Domain
+    # Leave Domain  
     leave_data: Optional[dict]
     awaiting_confirmation: bool
     confirmed: Optional[bool]

@@ -15,12 +15,16 @@ from app.schema.leave_request_schema import (
 )
 from datetime import datetime
 
+from app.services.mail_service import send_mail_information
+from app.repositories.employee_repository import EmployeeRepository
 
 class LeaveRequestService:
     def __init__(self, db: AsyncSession):
         self.db = db
         self.repo = LeaveRequestRepository(db)
         self.balance_repo = LeaveBalanceRepository(db)
+        self.employee_repo = EmployeeRepository(db)
+
 
     def _to_response(self, lr: LeaveRequest) -> LeaveRequestResponse:
         return LeaveRequestResponse(
@@ -123,7 +127,12 @@ class LeaveRequestService:
                 await self.balance_repo.update(balance)
 
         lr.status = request.action
+
         await self.repo.update(lr)
+
+        get_user = await self.employee_repo.get_by_id(lr.user_id)
+
+        await send_mail_information(worker=get_user, subject="Leave Request", message="Leave Accepeted")
 
         approval = LeaveApproval(
             leave_request_id=lr.id,
@@ -152,6 +161,11 @@ class LeaveRequestService:
             )
 
         await self.repo.delete(pending_request)
+
+        get_user = await self.employee_repo.get_by_id(user_id)
+
+        await send_mail_information(worker=get_user, subject="Leave Request", message="Leave Cancelled")
+
         await self.db.commit()
         return {
             "success": True,

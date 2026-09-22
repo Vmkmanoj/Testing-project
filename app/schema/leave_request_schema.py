@@ -10,7 +10,7 @@ class CreateLeaveRequestRequest(BaseModel):
     total_days: int
     reason: str | None = None
 
-
+    
 class ApproveLeaveRequest(BaseModel):
     action: str  # "APPROVED" or "REJECTED"
     comment: str | None = None

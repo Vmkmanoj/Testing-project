@@ -69,13 +69,33 @@ def generate(state: SQLAgentState):
     - Return only SQL without markdown formatting or code blocks.
     - If the user asks about "my" data (e.g. "my leave balance", "my manager"), filter by their User ID using the context provided.
     - If the user asks a conversational question that doesn't need a DB query, just output a generic SELECT 1 query and the format node will handle the rest.
-    - An employee can view only their own leave requests, leave history, leave balance, and leave details.
-        HR and Managers can view leave details of employees they are authorized to manage.
-        If an employee asks about another employee's leave details, the agent/backend should not provide any information and should respond:
-        "You don't have permission to view that employee's leave details."
-        Enforce this restriction in the backend using RBAC and authorization checks, not only in the UI.
-        The UI should also hide or disable access to other employees' leave details for regular employees.
-        Ensure the LangGraph agent/tools also respect these permissions and cannot expose leave information through another query or tool.
+    ============================================================
+    ACCESS CONTROL POLICY — STRICTLY ENFORCED
+    ============================================================
+    Current User ID  : {state.get('user_id', 'Unknown')}
+    Current User Role: {state.get('role', 'Unknown')}
+
+    IF role == 'EMPLOYEE':
+      - You MUST ONLY generate queries that access data belonging to
+        user_id = '{state.get('user_id', 'Unknown')}'.
+      - On personal tables (employees, leave_requests, leave_balances,
+        salaries, attendance) ALWAYS add:
+            WHERE user_id = '{state.get('user_id', 'Unknown')}'
+            OR   employee_id = '{state.get('user_id', 'Unknown')}'
+      - NEVER scan broad tables without a user_id filter.
+      - If the user asks about another person's data (e.g. "show John's leave",
+        "what is Alice's salary", "show all employees"):
+            Generate EXACTLY this query and nothing else:
+            SELECT 'ACCESS DENIED: You do not have permission to view another employee''s data. Only HR and Managers can access other employees'' information.' AS result;
+      - If the user tries to apply/cancel/modify leave for a different user:
+            Generate EXACTLY this query:
+            SELECT 'ACCESS DENIED: You can only manage your own leave requests.' AS result;
+
+    IF role == 'MANAGER' OR role == 'HR':
+      - You may query all employees' data.
+      - Still restricted to SELECT, INSERT INTO leave_requests, UPDATE leave_requests.
+      - NEVER generate DELETE, DROP, ALTER, or TRUNCATE.
+    ============================================================
     """
 
     result = llm.invoke(prompt)

@@ -37,7 +37,7 @@ def router_intent(state: SQLAgentState ) -> str:
             if intent == "greeting":
                 return "greeting"
             elif intent == "policy":
-                return "policy"
+                return "policy" 
             elif intent == "reject_leave":
                 return "reject_leave"
             else:
@@ -59,6 +59,10 @@ def check_validation(state : SQLAgentState):
 
     if state.get("validation_result") == "valid":
         return "execute_sql"
+
+    # Unauthorized access attempt — final_answer already set, show it directly
+    if state.get("validation_result") == "unauthorized":
+        return "format_answer"
         
     if state.get("validation_result") == "needs_confirmation":
         return "end"
